@@ -1,0 +1,12 @@
+﻿# dependencies
+node_modules/
+npm-debug.log*
+yarn.lock
+package-lock.json
+
+# environment
+.env
+
+# misc
+.DS_Store
+.vscode/

@@ -1,0 +1,191 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Yahoo Fair Trade Checker</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; background:#0b1220; color:#e7eef7; }
+    h1 { margin: 0 0 8px; }
+    .card { background:#121a2b; padding:16px; border-radius:14px; box-shadow:0 1px 8px rgba(0,0,0,.25); margin-bottom:18px; }
+    select, button, a.button { padding:10px 12px; border-radius:10px; border:1px solid #314066; background:#0f172a; color:#e7eef7; cursor:pointer; text-decoration:none; display:inline-block; }
+    select { min-width: 240px; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .row { display:flex; gap:16px; flex-wrap:wrap; }
+    .col { flex:1 1 320px; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; background:#1d2a48; border-radius:999px; margin:6px 6px 0 0; font-size:13px; }
+    .result { font-weight:700; padding:10px 14px; border-radius:10px; display:inline-block; }
+    .green { background:#16371f; color:#bdf1c8; }
+    .yellow { background:#3b3415; color:#f6f1b0; }
+    .muted { color:#a7b3cc; font-size:13px; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .spacer { flex:1; }
+    .err { color:#ffb4b4; }
+  </style>
+</head>
+<body>
+  <h1>Yahoo Fair Trade Checker</h1>
+
+  <div class="card" id="authCard" style="display:none">
+    <p class="muted" id="authMsg">You’re not logged in. Click below to sign in with Yahoo.</p>
+    <div class="actions">
+      <a class="button" id="loginLink" href="/login">Log in with Yahoo</a>
+    </div>
+  </div>
+
+  <div class="card" id="topBar" style="display:none">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <div id="league"><span class="muted">Loading league…</span></div>
+      <div class="spacer"></div>
+      <div class="actions">
+        <a class="button" href="/logout">Logout</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="row" id="tradeUI" style="display:none">
+    <div class="card col">
+      <h3>Team A</h3>
+      <select id="teamA"></select>
+      <div id="playersA" style="margin-top:10px;"></div>
+    </div>
+    <div class="card col">
+      <h3>Team B</h3>
+      <select id="teamB"></select>
+      <div id="playersB" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <div class="card" id="evalCard" style="display:none">
+    <div class="actions">
+      <button id="evalBtn">Evaluate Trade</button>
+      <span id="spinner" class="muted" style="display:none">Working…</span>
+    </div>
+    <div id="result" style="margin-top:12px;"></div>
+    <div class="muted" style="margin-top:6px" id="ruleLine"></div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+    const leagueDiv = $("#league");
+    const teamA = $("#teamA"), teamB = $("#teamB");
+    const playersA = $("#playersA"), playersB = $("#playersB");
+    const authCard = $("#authCard"), topBar = $("#topBar"), tradeUI = $("#tradeUI"), evalCard = $("#evalCard");
+    const spinner = $("#spinner"), result = $("#result");
+    let teams = [];
+
+    const show = (el, on) => { if (el) el.style.display = on ? "" : "none"; };
+
+    async function safeJSON(res) {
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) return res.json();
+      const t = await res.text();
+      try { return JSON.parse(t); } catch { return { error: t || "Unknown error" }; }
+    }
+
+    async function getJSON(url, opts) {
+      const res = await fetch(url, opts);
+      if (res.status === 401) throw new Error("unauthorized");
+      const data = await safeJSON(res);
+      if (!res.ok) throw new Error(data?.error || "Request failed");
+      return data;
+    }
+
+    function makePlayerList(el, roster) {
+      el.innerHTML = "";
+      const wrap = document.createElement("div");
+      (roster.roster || []).forEach(p => {
+        const id = p.player_key;
+        const name = p.player?.[0]?.name?.full || "Unknown";
+        const pos = (p.player?.[1]?.eligible_positions || []).map(x => x.position).join("/") || "—";
+        const lab = document.createElement("label");
+        lab.className = "pill";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.value = id;
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(` ${name} (${pos})`));
+        wrap.appendChild(lab);
+      });
+      el.appendChild(wrap);
+    }
+
+    async function loadRoster(side) {
+      const key = side === "A" ? teamA.value : teamB.value;
+      if (!key) return;
+      const res = await fetch(`/api/roster/${encodeURIComponent(key)}`);
+      if (!res.ok) return;
+      const roster = await res.json();
+      if (side === "A") makePlayerList(playersA, roster);
+      else makePlayerList(playersB, roster);
+    }
+
+    async function init() {
+      try {
+        const cfg = await getJSON("/api/config");
+        $("#ruleLine").textContent =
+          `Rule: both teams ≥ ${cfg.lossTolerance.toFixed(2)} and one team ≥ ${cfg.gainMin.toFixed(2)}, imbalance ≤ ${cfg.imbalanceMax.toFixed(2)}`;
+      } catch {}
+
+      try {
+        const data = await getJSON("/api/league");
+        teams = data.teams || [];
+        leagueDiv.innerHTML = `<b>League:</b> ${data.leagueKey}`;
+        const opts = teams.map(t => `<option value="${t.team_key}">${t.name}</option>`).join("");
+        teamA.innerHTML = opts; teamB.innerHTML = opts;
+
+        await loadRoster("A");
+        await loadRoster("B");
+
+        show(authCard, false);
+        show(topBar, true);
+        show(tradeUI, true);
+        show(evalCard, true);
+      } catch (e) {
+        $("#authMsg").innerHTML = e.message === "unauthorized"
+          ? "You’re not logged in. Click below to sign in with Yahoo."
+          : `Unable to load league. <span class="err">${e.message}</span>`;
+        show(authCard, true);
+        show(topBar, false);
+        show(tradeUI, false);
+        show(evalCard, false);
+      }
+    }
+
+    teamA.addEventListener("change", () => loadRoster("A"));
+    teamB.addEventListener("change", () => loadRoster("B"));
+
+    $("#evalBtn").addEventListener("click", async () => {
+      const sendA = [...playersA.querySelectorAll("input:checked")].map(i => i.value);
+      const sendB = [...playersB.querySelectorAll("input:checked")].map(i => i.value);
+      const body = { teamAKey: teamA.value, teamBKey: teamB.value, sendA, sendB };
+
+      result.textContent = "";
+      spinner.style.display = "";
+      try {
+        const res = await fetch("/api/evaluate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const out = await safeJSON(res);
+        if (!res.ok) throw new Error(out?.error || "Error");
+        const cls = out.verdict.color;
+        result.innerHTML = `
+          <div class="result ${cls}">${out.verdict.status}</div>
+          <div style="margin-top:8px">
+            Team A Impact: <b>${out.tiA}</b> &nbsp; | &nbsp;
+            Team B Impact: <b>${out.tiB}</b>
+          </div>
+        `;
+      } catch (err) {
+        result.innerHTML = `<span class="err">${err.message || "Error"}</span>`;
+      } finally {
+        spinner.style.display = "none";
+      }
+    });
+
+    init();
+  </script>
+</body>
+</html>

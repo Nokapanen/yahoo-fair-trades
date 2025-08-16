@@ -1,0 +1,16 @@
+{
+  "name": "yahoo-fair-trades",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-session": "^1.18.2",
+    "yahoo-fantasy": "^3.2.0"
+  }
+}
