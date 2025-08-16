@@ -1,11 +1,13 @@
 {
   "name": "yahoo-fair-trades",
   "version": "1.0.0",
-  "private": true,
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"
+  },
+  "engines": {
+    "node": "20.x"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
